@@ -6,25 +6,45 @@ real `claude` CLI (via your existing `chat` shell function) to a pseudo-terminal
 and streams it to an xterm.js terminal in the browser. Behaviour is identical to
 the CLI: same rendering, same `--continue`, same workspace/template/archive logic.
 
-## Requirements
-- **zsh** (macOS default) and **Node.js 18+**.
-- The [`claude` CLI](https://claude.com/claude-code) installed and on `PATH`.
+## Requirements (install these first)
+- **macOS or Linux with `zsh`** (macOS's default shell).
+- **Node.js 18+** — macOS: `brew install node`.
+- **The `claude` CLI, installed and signed in to your OWN account** —
+  see https://claude.com/claude-code. Verify with `claude --version`, then run
+  `claude` once and log in. Auth is per-person; nothing about it is shared here.
+- Optional: **ripgrep** (`brew install ripgrep`) for faster `chatfind`.
 
-The `chat` / `chats` / `chatweb` shell commands **and** the workspace template are
-bundled in [`shell/`](shell/); `install.sh` wires them into your `~/.zshrc`, so you
-don't need any prior setup. (The server launches each session by running
-`zsh -ic 'chat "$1"'`, reusing that bundled `chat` function — everything it needs
-ships in this repo.)
+Everything else — the `chat` / `chats` / `chatweb` commands and the new-session
+template — is bundled in [`shell/`](shell/), so there's no prior shell config to
+copy from anyone. (The server starts each session with `zsh -ic 'chat "$1"'`,
+reusing the bundled `chat` function — it all ships in this repo.)
 
 ## Setup (new machine / coworker)
 ```bash
+# 1. clone
 git clone https://github.com/FassetIO/claude-chatweb.git ~/claude-chats-web
 cd ~/claude-chats-web
-./install.sh          # installs deps + adds the shell commands to ~/.zshrc
-# open a NEW terminal (or: source ~/.zshrc)
-chatweb               # web UI  —  or:  chat <name>  for the plain terminal
+
+# 2. install: npm deps + adds the shell commands to your ~/.zshrc (idempotent)
+./install.sh
+
+# 3. reload your shell
+source ~/.zshrc          # or just open a new terminal window
 ```
-Chats live under `~/claude-chats/<name>/`. Run `chathelp` to list every command.
+Then use it:
+```bash
+chatweb                  # open the web UI (prints a 127.0.0.1 URL with a token)
+chat <name>              # …or the plain terminal, identical to the CLI
+chathelp                 # list every command
+```
+
+Prefer not to run `install.sh`? Do it by hand — add this one line to your `~/.zshrc`
+and reload (after `npm install` in the repo):
+```bash
+source "$HOME/claude-chats-web/shell/claude-chats.zsh"
+```
+
+Your chats live under `~/claude-chats/<name>/` on your own machine — private to you.
 
 ## Run
 ```
