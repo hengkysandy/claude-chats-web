@@ -6,15 +6,25 @@ real `claude` CLI (via your existing `chat` shell function) to a pseudo-terminal
 and streams it to an xterm.js terminal in the browser. Behaviour is identical to
 the CLI: same rendering, same `--continue`, same workspace/template/archive logic.
 
-## Requirements (important — not fully standalone)
-This app **reuses your existing shell setup** rather than reimplementing chat:
+## Requirements
+- **zsh** (macOS default) and **Node.js 18+**.
 - The [`claude` CLI](https://claude.com/claude-code) installed and on `PATH`.
-- A **`chat` shell function** in your `~/.zshrc` that starts/resumes a named
-  workspace under `~/claude-chats/<name>/` (from the "founder-config" setup). The
-  server literally runs `zsh -ic 'chat "$1"'` per session, so without that function
-  it won't launch sessions. Adapt `startSession()` in `server.js` if your launcher
-  differs.
-- macOS/Linux with `zsh`. Node 18+.
+
+The `chat` / `chats` / `chatweb` shell commands **and** the workspace template are
+bundled in [`shell/`](shell/); `install.sh` wires them into your `~/.zshrc`, so you
+don't need any prior setup. (The server launches each session by running
+`zsh -ic 'chat "$1"'`, reusing that bundled `chat` function — everything it needs
+ships in this repo.)
+
+## Setup (new machine / coworker)
+```bash
+git clone https://github.com/FassetIO/claude-chatweb.git ~/claude-chats-web
+cd ~/claude-chats-web
+./install.sh          # installs deps + adds the shell commands to ~/.zshrc
+# open a NEW terminal (or: source ~/.zshrc)
+chatweb               # web UI  —  or:  chat <name>  for the plain terminal
+```
+Chats live under `~/claude-chats/<name>/`. Run `chathelp` to list every command.
 
 ## Run
 ```
