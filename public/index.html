@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>claude-chats</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="stylesheet" href="/assets/xterm.css" />
+  <style>
+    :root {
+      --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #e6edf3;
+      --muted: #8b949e; --accent: #d97757; --accent-dim: #3d2a22; --hover: #21262d;
+      --green: #3fb950;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      display: flex; flex-direction: column; height: 100vh;
+    }
+    header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--panel);
+    }
+    header .logo { width: 22px; height: 22px; display: block; image-rendering: pixelated; }
+    header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+    header .spacer { flex: 1; }
+    header button { background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 5px 12px; cursor: pointer; font: inherit; font-size: 13px; }
+    header button:hover { color: var(--text); border-color: var(--muted); }
+
+    /* tab strip */
+    #tabbar { display: flex; gap: 4px; padding: 6px 10px 0; background: var(--panel); border-bottom: 1px solid var(--border); overflow-x: auto; }
+    .tab {
+      display: flex; align-items: center; gap: 7px; cursor: pointer; white-space: nowrap;
+      padding: 7px 12px; border: 1px solid var(--border); border-bottom: none;
+      border-radius: 7px 7px 0 0; color: var(--muted); background: transparent; font-size: 13px;
+    }
+    .tab:hover { color: var(--text); background: var(--hover); }
+    .tab.active { color: var(--text); background: var(--bg); border-color: var(--muted); }
+    .tab .live { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+    .tab .x { color: var(--muted); font-size: 15px; line-height: 1; padding: 0 2px; border-radius: 4px; }
+    .tab .x:hover { color: #fff; background: #6e2b2b; }
+
+    #main { flex: 1; min-height: 0; display: flex; }
+    #home { flex: 1; overflow: auto; padding: 18px; }
+    #terms { flex: 1; min-height: 0; position: relative; display: none; }
+    .termwrap { position: absolute; inset: 0; padding: 6px 8px; background: #000; }
+    .termwrap.dragover { outline: 2px dashed var(--accent); outline-offset: -6px; }
+
+    .bar { display: flex; gap: 8px; margin-bottom: 12px; max-width: 680px; }
+    .bar input { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 9px 12px; font: inherit; }
+    .bar input:focus { outline: none; border-color: var(--accent); }
+    .bar button { background: var(--accent); color: #1a1a1a; border: 0; border-radius: 6px; padding: 0 18px; cursor: pointer; font: inherit; font-weight: 600; }
+    .bar button:hover { filter: brightness(1.08); }
+
+    .section-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; margin: 18px 0 8px; }
+    .chat { display: flex; align-items: center; gap: 12px; max-width: 900px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; background: var(--panel); }
+    .chat:hover { border-color: var(--muted); }
+    .chat .arrow { color: var(--accent); cursor: pointer; }
+    .chat .name { font-weight: 600; cursor: pointer; }
+    .chat .live { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex: none; }
+    .chat .grow { flex: 1; }
+    .chat .snippet { flex: 1; min-width: 0; color: var(--muted); font-size: 12px; opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chat .badge { color: var(--accent); background: var(--accent-dim); border-radius: 4px; font-size: 11px; padding: 1px 7px; text-transform: uppercase; letter-spacing: .4px; flex: none; }
+    .chat .meta { display: flex; flex-direction: column; align-items: flex-end; min-width: 150px; white-space: nowrap; line-height: 1.35; flex: none; }
+    .chat .meta .rel { color: var(--text); opacity: .8; font-size: 12px; }
+    .chat .meta .abs { color: var(--muted); opacity: .6; font-size: 12px; }
+    .chat .actions { display: flex; gap: 8px; flex: none; }
+    .chat .act { border: 1px solid var(--border); color: var(--muted); background: transparent; border-radius: 5px; padding: 4px 9px; cursor: pointer; font: inherit; font-size: 12px; }
+    .chat .act:hover { color: var(--text); border-color: var(--muted); }
+    .empty { color: var(--muted); padding: 24px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <img class="logo" src="/favicon.png" alt="" />
+    <h1>claude-chats</h1>
+    <span class="spacer"></span>
+    <button id="refresh">refresh</button>
+  </header>
+
+  <div id="tabbar"></div>
+
+  <div id="main">
+    <div id="home">
+      <div class="bar">
+        <input id="newname" placeholder="new chat name (letters, numbers, - _ .)" autocomplete="off" />
+        <button id="newbtn">start</button>
+      </div>
+      <div class="bar">
+        <input id="q" placeholder="search notes… all words must match, e.g. github own (chatfind)" autocomplete="off" />
+      </div>
+      <div id="rows"></div>
+    </div>
+    <div id="terms"></div>
+  </div>
+
+  <script src="/assets/xterm.js"></script>
+  <script src="/assets/addon-fit.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
