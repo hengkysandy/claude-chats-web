@@ -24,6 +24,7 @@ claude-chats — named conversations for ad-hoc tasks
                     Restore an archived chat back to active.
   chatsarchived     List archived chats — name, updated, created (JKT).
   chatweb           Open the local web UI to browse & run chats in the browser.
+  chatweb-stop      Stop the running web UI server.
   chathelp          Show this help.
 EOF
 }
@@ -35,6 +36,15 @@ chatweb() {
   [ -d "$dir" ] || { echo "claude-chats-web not found at $dir"; return 1; }
   [ -d "$dir/node_modules" ] || { echo "deps missing — run: (cd \"$dir\" && npm install)"; return 1; }
   ( cd "$dir" && node server.js )
+}
+
+# Stop the local web UI server (kills whatever is listening on the chatweb port).
+chatweb-stop() {
+  local port="${CHATWEB_PORT:-8790}"
+  local pids
+  pids="$(lsof -ti tcp:"$port" -sTCP:LISTEN 2>/dev/null)"
+  [ -z "$pids" ] && { echo "chatweb not running (nothing on port $port)"; return 0; }
+  echo "$pids" | xargs kill 2>/dev/null && echo "→ stopped chatweb (port $port)"
 }
 
 # Start or resume a named conversation. Usage: chat <name>
