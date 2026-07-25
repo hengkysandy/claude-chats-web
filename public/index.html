@@ -114,6 +114,7 @@
     .help-body .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; vertical-align: middle; }
     .help-body .dot.green { background: var(--green); }
     .help-body .dot.amber { background: var(--amber); animation: pulse 1.2s ease-in-out infinite; }
+    .help-body .dot.accent { background: var(--accent); }
 
     /* Narrow window: drop it below the list rather than hiding it outright. */
     @media (max-width: 1080px) {
@@ -290,7 +291,8 @@
 
             <dt>status dot</dt>
             <dd><span class="dot green"></span> idle — ready for you<br />
-                <span class="dot amber"></span> Claude is working</dd>
+                <span class="dot amber"></span> Claude is working<br />
+                <span class="dot accent"></span> finished while you were away</dd>
 
             <dt>drop in files</dt>
             <dd>Drag a file <i>or folder</i> onto a session — its real path gets typed in.</dd>
@@ -304,7 +306,8 @@
             </dd>
 
             <dt>sound</dt>
-            <dd><b>🔔</b> up top plays a chime when a session finishes.</dd>
+            <dd><b>🔔</b> up top chimes when a session finishes.
+                The browser tab shows <code>(1) ●</code> too.</dd>
           </dl>
         </div>
       </aside>
