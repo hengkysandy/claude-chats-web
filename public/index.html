@@ -66,7 +66,53 @@
     .tab .x:hover { color: #fff; background: #6e2b2b; }
 
     #main { flex: 1; min-height: 0; display: flex; }
-    #home { flex: 1; overflow: auto; padding: 18px; }
+    #home { flex: 1; overflow: auto; padding: 18px; display: flex; gap: 26px; align-items: flex-start; }
+    .home-main { flex: 1; min-width: 0; max-width: 900px; }
+
+    /* Help card, parked in the dead space beside the list. Collapsible, and the
+       choice sticks — it's onboarding, not something to read every day. */
+    .home-help {
+      width: 310px; flex: none; position: sticky; top: 0;
+      border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+      font-size: 12px; line-height: 1.55;
+    }
+    .help-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 9px 12px; border-bottom: 1px solid var(--border);
+      color: var(--muted); text-transform: uppercase; letter-spacing: .5px; font-size: 11px;
+    }
+    .help-head button {
+      background: transparent; border: 0; color: var(--muted); cursor: pointer;
+      font: inherit; font-size: 11px; padding: 0; text-transform: none; letter-spacing: 0;
+    }
+    .help-head button:hover { color: var(--text); }
+    .home-help.collapsed .help-body { display: none; }
+    .help-body { padding: 4px 12px 12px; }
+    .help-body dl { margin: 0; }
+    .help-body dt {
+      color: var(--accent); margin: 11px 0 3px; font-size: 11px;
+      text-transform: uppercase; letter-spacing: .4px;
+    }
+    .help-body dd { margin: 0; color: var(--muted); }
+    .help-body b { color: var(--text); font-weight: 600; }
+    .help-body code {
+      color: var(--text); background: var(--bg); border: 1px solid var(--border);
+      border-radius: 3px; padding: 0 4px; font-size: 11px;
+    }
+    .help-body .k {
+      display: inline-block; color: var(--text); background: var(--bg);
+      border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px;
+      padding: 0 5px; margin: 1px 1px; font-size: 11px; line-height: 1.5;
+    }
+    .help-body .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; vertical-align: middle; }
+    .help-body .dot.green { background: var(--green); }
+    .help-body .dot.red { background: var(--alert); }
+
+    /* Narrow window: drop it below the list rather than hiding it outright. */
+    @media (max-width: 1080px) {
+      #home { flex-direction: column; }
+      .home-help { width: 100%; max-width: 900px; position: static; }
+    }
 
     /* Terminal area: a grid so 1–4 sessions can share the viewport. Only the panes
        in the current layout carry .pane; the rest stay in the DOM (so their PTY and
@@ -199,14 +245,53 @@
 
   <div id="main">
     <div id="home">
-      <div class="bar">
-        <input id="newname" placeholder="new chat name (letters, numbers, - _ .)" autocomplete="off" />
-        <button id="newbtn">start</button>
+      <div class="home-main">
+        <div class="bar">
+          <input id="newname" placeholder="new chat name (letters, numbers, - _ .)" autocomplete="off" />
+          <button id="newbtn">start</button>
+        </div>
+        <div class="bar">
+          <input id="q" placeholder="search notes… all words must match, e.g. github own (chatfind)" autocomplete="off" />
+        </div>
+        <div id="rows"></div>
       </div>
-      <div class="bar">
-        <input id="q" placeholder="search notes… all words must match, e.g. github own (chatfind)" autocomplete="off" />
-      </div>
-      <div id="rows"></div>
+
+      <aside class="home-help" id="help">
+        <div class="help-head">
+          <span>how it works</span>
+          <button id="helptoggle" title="hide">hide</button>
+        </div>
+        <div class="help-body">
+          <dl>
+            <dt>chats</dt>
+            <dd>Type a name → <b>start</b>. Click any chat to resume it.
+                Each one is just a folder in <code>~/claude-chats</code>.</dd>
+
+            <dt>panes</dt>
+            <dd><b>1 2 3 4</b> split the screen. Click a pane to focus it —
+                the next chat you open takes that pane.</dd>
+
+            <dt>status dot</dt>
+            <dd><span class="dot green"></span> running
+                &nbsp;·&nbsp;
+                <span class="dot red"></span> finished, wants you</dd>
+
+            <dt>drop in files</dt>
+            <dd>Drag a file <i>or folder</i> onto a session — its real path gets typed in.</dd>
+
+            <dt>keys</dt>
+            <dd>
+              <span class="k">⌘1</span>–<span class="k">⌘4</span> layout
+              &nbsp; <span class="k">⌘0</span> this list<br />
+              <span class="k">⌘⇧[</span> <span class="k">⌘⇧]</span> switch pane<br />
+              <span class="k">⌘F</span> find in session, <span class="k">↑</span><span class="k">↓</span> to step
+            </dd>
+
+            <dt>sound</dt>
+            <dd><b>🔔</b> up top plays a chime when a session finishes.</dd>
+          </dl>
+        </div>
+      </aside>
     </div>
     <div id="terms"></div>
   </div>

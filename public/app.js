@@ -675,6 +675,15 @@ window.addEventListener('resize', () => {
   }, 80);
 });
 
+// Help card: collapsed state persists, so it stops being in the way once you know it.
+function setHelp(open) {
+  $('help').classList.toggle('collapsed', !open);
+  $('helptoggle').textContent = open ? 'hide' : 'show';
+  try { localStorage.setItem('chatweb:help', open ? '1' : '0'); } catch {}
+}
+$('helptoggle').onclick = () => setHelp($('help').classList.contains('collapsed'));
+try { setHelp(localStorage.getItem('chatweb:help') !== '0'); } catch { setHelp(true); }
+
 document.addEventListener('keydown', onShortcut, true);   // capture: beat xterm to it
 $('sound').onclick = () => setSound(!soundOn, true);
 // Coming back to the tab means you're looking again — clear the focused pane's flag.
