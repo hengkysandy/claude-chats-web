@@ -22,7 +22,7 @@ reusing the bundled `chat` function — it all ships in this repo.)
 ## Setup (new machine / coworker)
 ```bash
 # 1. clone
-git clone https://github.com/FassetIO/claude-chatweb.git ~/claude-chats-web
+git clone https://github.com/hengkysandy/claude-chats-web.git ~/claude-chats-web
 cd ~/claude-chats-web
 
 # 2. install: npm deps + adds the shell commands to your ~/.zshrc (idempotent)
@@ -56,11 +56,49 @@ It prints a `http://127.0.0.1:8790/?token=…` URL and opens it. `Ctrl-C` to sto
 - **New chat:** type a name, hit *start* → creates the workspace and launches Claude.
 - **Existing chat:** click it → resumes with `claude -c`.
 - **Archived chats** are listed (badge); opening one auto-restores it, same as the CLI.
-- **Images:** drag an image onto the terminal, or paste one from the clipboard (⌘V).
-  The browser can't see a real file path, so the bytes are sent over the socket, the
-  server writes a temp file under `~/claude-chats-web/.uploads/` (pruned after 24h,
-  outside chat workspaces so backups stay clean), and types that path in wrapped in
-  bracketed-paste — so Claude renders it as `[Image #N]`, same as a CLI drag. 20 MB cap.
+
+### Split panes
+The `1 2 3 4` buttons in the header split the terminal area so you can watch several
+sessions at once:
+
+| | layout |
+|---|---|
+| **1** | one session, full width (default) |
+| **2** | left \| right |
+| **3** | left \| right on top, one full-width below |
+| **4** | 2×2 grid |
+
+Click a pane to focus it — the next chat you open from the tab bar takes *that* pane.
+Sessions not currently on screen keep running; they're just hidden, so nothing is lost
+by switching layouts. Each pane gets its own `cols`/`rows` and resizes its PTY
+independently.
+
+### Find in session (⌘F / Ctrl-F)
+Browser find can't see terminal output, so the UI drives xterm's search addon instead.
+`⌘F` (macOS) or `Ctrl-F` (Linux/Windows) opens a find bar in the focused pane —
+`Ctrl-Shift-F` works everywhere as a fallback. Enter / Shift-Enter step through
+matches, `Aa` toggles case sensitivity, Esc closes. Every match on screen is
+highlighted and the active one is picked out in orange, with an `n/total` counter.
+
+> On macOS the shortcut is ⌘F rather than Ctrl-F on purpose: Ctrl-F is *forward-char*
+> in the prompt's readline, and hijacking it would break cursor movement.
+
+### Dropping files and folders
+Drag a file **or folder** from Finder onto a session and its real path is typed in,
+exactly like a drag into a real terminal.
+
+The browser deliberately never exposes a dragged item's true path, so the server finds
+it: it looks up the basename (Spotlight on macOS, `find` elsewhere, scoped to `$HOME`
+and `/Volumes`) and then verifies each candidate against a signature the browser *can*
+see — child names for a folder, size + mtime for a file. One verified match is used
+directly; several offer a picker; none falls back to uploading the bytes.
+
+- **Images / clipboard paste (⌘V)** have no path to find, so they still upload by
+  value: the bytes go over the socket, the server writes a temp file under
+  `~/claude-chats-web/.uploads/` (pruned after 24h, outside chat workspaces so backups
+  stay clean) and types that path in. Claude renders it as `[Image #N]`. 20 MB cap.
+- Resolving a path is better than uploading a copy — Claude then reads the **live**
+  file rather than a snapshot taken at drop time.
 
 ## Session persistence (survives disconnects)
 A session's Claude process is **decoupled from the browser connection**, so it keeps
@@ -101,3 +139,17 @@ drive `/pty` gets a shell as you. Controls, in layers:
 - `node-pty` ships a prebuilt `spawn-helper` that npm extracts without the execute
   bit (causes `posix_spawnp failed`). The `postinstall` script re-adds `+x`; if you
   ever reinstall and hit that error, run `npm run postinstall`.
+- The PTY always runs **zsh**, even if your login shell is bash or fish — `chat` is a
+  zsh function, so anything else would fail with `chat: command not found`.
+- Chat search (the box on the home screen) indexes `*.md` per chat, skipping
+  `CLAUDE.md`, dotdirs, and vendor/build dirs (`node_modules`, `.venv`, `dist`, …).
+  Results are cached and invalidated by file mtime/size, so an unchanged workspace is
+  never re-read. Notes nested more than 6 levels deep are not indexed.
+
+## Contributing
+Bug reports and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). The short
+version: no new runtime dependencies, no build step, and don't weaken the security
+posture above.
+
+## License
+[MIT](LICENSE) © Hengky Sandy.
