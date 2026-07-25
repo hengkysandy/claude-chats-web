@@ -183,21 +183,40 @@ function pushBuf(s, chunk) {
 function sendPty(ws, str) { if (ws && ws.readyState === 1) { try { ws.send(Buffer.from(str, 'utf8')); } catch {} } }
 function sendCtl(ws, obj) { if (ws && ws.readyState === 1) { try { ws.send(JSON.stringify(obj)); } catch {} } }
 // ---- busy / idle state ---------------------------------------------------------
-// The dot reports what the session IS doing, rather than firing an alarm when it
-// stops. Claude Code redraws its spinner continuously while it works, so PTY output
-// flowing is a good proxy for "busy"; output going quiet means it's waiting on you.
+// Read what is ON SCREEN, not how fast bytes arrive. "Output flowing == busy" looks
+// right but is wrong: once a real terminal is attached, Claude Code polls the cursor
+// position, the emulator answers, and that alone keeps a fully idle session emitting
+// a chunk every few milliseconds — so a timing heuristic latches on and never clears.
 //
-// BUSY_IDLE_MS is how long output must be silent before we call it idle. Too short and
-// it flickers on natural gaps between tool calls; too long and "done" feels laggy.
-const BUSY_IDLE_MS = parseInt(process.env.CHATWEB_BUSY_IDLE_MS || '2000', 10);
+// The honest signal is Claude's own spinner. Note it is NOT enough to look for the
+// "esc to interrupt" hint: that is painted once when work starts, after which Claude
+// patches only the parts that change. What actually repeats, many times a second and
+// only while working, is the animated glyph and the elapsed/token counters.
+const MARKER_IDLE_MS = parseInt(process.env.CHATWEB_IDLE_MS || '1200', 10);
 
-function noteActivity(s) {
+// Spinner frames. Tested on a raw PTY capture rather than guessed.
+const SPINNER = /[✶✻✽✳✢]/;            // ✶ ✻ ✽ ✳ ✢
+// Text that only the working footer carries. Claude repaints with absolute column
+// jumps ("esc\x1b[54Gto\x1b[57Ginterrupt"), so compare with ANSI and whitespace
+// removed — that matches both the wrapped and the contiguous rendering.
+const WORK_TEXT = /esctointerrupt|compactingconversation|\(\d+s[·)]|↓\d+tokens/;
+const normalize = (str) => str
+  .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')   // OSC (title sets, etc.)
+  .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '')          // CSI
+  .replace(/\s+/g, '')
+  .toLowerCase();
+
+function noteActivity(s, data) {
+  // Keep a short tail so a marker split across two chunks is still seen.
+  s.tail = (s.tail + normalize(data)).slice(-256);
+  if (!SPINNER.test(data) && !WORK_TEXT.test(s.tail)) return;
+  s.tail = '';                                     // consume; the spinner redraws anyway
   if (!s.busy) { s.busy = true; sendState(s); }
   if (s.idleTimer) clearTimeout(s.idleTimer);
   s.idleTimer = setTimeout(() => {
     s.busy = false;
     sendState(s);                                  // busy -> idle is also "it finished"
-  }, BUSY_IDLE_MS);
+  }, MARKER_IDLE_MS);
   if (s.idleTimer.unref) s.idleTimer.unref();
 }
 function sendState(s) { sendCtl(s.ws, { type: 'state', name: s.name, busy: !!s.busy }); }
@@ -215,9 +234,9 @@ function startSession(name, cols, rows) {
     name: 'xterm-256color', cols, rows, cwd: HOME, env: process.env,
   });
   const s = { name, term, cols, rows, ws: null, buf: [], bufLen: 0, graceTimer: null, exited: false,
-              busy: false, idleTimer: null };
+              busy: false, idleTimer: null, tail: '' };
   sessions.set(name, s);
-  term.onData((d) => { pushBuf(s, d); sendPty(s.ws, d); noteActivity(s); });
+  term.onData((d) => { pushBuf(s, d); sendPty(s.ws, d); noteActivity(s, d); });
   term.onExit(() => {
     s.exited = true;
     sendPty(s.ws, '\r\n\x1b[90m[session ended]\x1b[0m\r\n');
@@ -542,4 +561,5 @@ module.exports = {
   walkMd, chatIndex, listChats, searchChats, bestSnippet, moveChat,
   scoreCandidate, resolveDrop, findByName, shellEscape,
   parseBody, saveUpload, hostOk, originOk,
+  normalize, SPINNER, WORK_TEXT, noteActivity,
 };

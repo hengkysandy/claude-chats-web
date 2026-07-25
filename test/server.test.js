@@ -255,3 +255,65 @@ test('saveUpload rejects empty payloads and sanitises the filename', () => {
     'traversal stripped from the stored name');
   fs.unlinkSync(p);
 });
+
+// ---- busy / idle detection ------------------------------------------------------
+// The old heuristic was "any PTY output means busy". That is always true in practice:
+// with a terminal attached, Claude polls the cursor position and the emulator's replies
+// keep an *idle* session emitting a chunk every few ms, so the dot latched amber forever.
+
+test('normalize strips ANSI and whitespace so column-jump redraws still match', () => {
+  // Claude repaints word-by-word with absolute column moves rather than plain spaces.
+  const jumpy = 'esc\x1b[54Gto\x1b[57Ginterrupt';
+  assert.ok(srv.normalize(jumpy).includes('esctointerrupt'));
+  // Contiguous rendering, coloured, must match identically.
+  assert.ok(srv.normalize('\x1b[2m(esc to interrupt)\x1b[0m').includes('esctointerrupt'));
+  // OSC title sequences must not leak their text into the comparison.
+  assert.equal(srv.normalize('\x1b]0;esc to interrupt\x07ok'), 'ok');
+});
+
+test('the animated spinner glyph keeps a session busy', () => {
+  // "esc to interrupt" is painted ONCE when work starts; after that Claude patches only
+  // the parts that change. The glyph and the counters are what actually repeat, so they
+  // are what must hold the state up. Frames taken from a real PTY capture.
+  for (const frame of ['\u2736 razzle-dazzling\u2026', '\u273B waddling\u2026', '\u2733 (2s \u00b7 thinking)', '\u2193 345 tokens)']) {
+    const s = { name: 'zz', tail: '', busy: false, idleTimer: null, ws: null };
+    srv.noteActivity(s, frame);
+    assert.equal(s.busy, true, `frame should read as working: ${frame}`);
+    if (s.idleTimer) clearTimeout(s.idleTimer);
+  }
+});
+
+test('a working spinner marks busy, and its absence clears it', async () => {
+  const sent = [];
+  const s = { name: 'zz', tail: '', busy: false, idleTimer: null,
+              ws: { readyState: 1, send: (m) => sent.push(JSON.parse(m)) } };
+
+  srv.noteActivity(s, 'thinking… (12s · esc to interrupt)');
+  assert.equal(s.busy, true, 'spinner on screen => busy');
+  assert.deepEqual(sent.at(-1), { type: 'state', name: 'zz', busy: true });
+
+  // Idle chatter (cursor-position answers, repaints with no spinner) must NOT hold it busy.
+  const before = sent.length;
+  srv.noteActivity(s, '\x1b[?25l\x1b[H\r\x1b[83C\x1b[24B\x1b[K\x1b[?25h');
+  assert.equal(sent.length, before, 'plain repaints emit no state change');
+
+  await new Promise((r) => setTimeout(r, 1800));   // > MARKER_IDLE_MS
+  assert.equal(s.busy, false, 'spinner gone => idle');
+  assert.deepEqual(sent.at(-1), { type: 'state', name: 'zz', busy: false });
+});
+
+test('a marker split across two chunks is still detected', () => {
+  const s = { name: 'zz', tail: '', busy: false, idleTimer: null, ws: null };
+  srv.noteActivity(s, 'working (esc to int');
+  assert.equal(s.busy, false, 'half a marker is not a match');
+  srv.noteActivity(s, 'errupt)');
+  assert.equal(s.busy, true, 'the tail bridges the chunk boundary');
+  if (s.idleTimer) clearTimeout(s.idleTimer);
+});
+
+test('compaction counts as working', () => {
+  const s = { name: 'zz', tail: '', busy: false, idleTimer: null, ws: null };
+  srv.noteActivity(s, '✻ Compacting conversation… (4m 6s)');
+  assert.equal(s.busy, true);
+  if (s.idleTimer) clearTimeout(s.idleTimer);
+});
