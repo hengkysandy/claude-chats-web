@@ -20,13 +20,20 @@ changes need a restart (`chatweb-stop`, then `chatweb`).
 ## Before you open a PR
 
 ```bash
+npm test                       # node --test — must be green
 npm run check                  # syntax-checks server.js and public/app.js
 zsh -n shell/claude-chats.zsh  # parse-check the shell functions
 ```
 
-There is no test suite yet. If you touch anything non-obvious, say in the PR how you
-verified it — a paste of the commands you ran is fine. Contributions that add real
-tests are very welcome.
+Tests use Node's built-in runner — no test framework dependency. They point
+`CHATWEB_CHATS_ROOT` at a temp dir, so they never touch your real `~/claude-chats`.
+`server.js` binds a port only when run directly (`require.main === module`), which is
+what makes it requirable from a test.
+
+Coverage is server-side today: name validation, archive/restore, notes indexing and
+caching, search, the dropped-path resolver, and the request guards. **The browser code
+in `public/app.js` has no automated tests** — if you change it, say in the PR how you
+verified it by hand.
 
 ## Ground rules
 
@@ -46,11 +53,16 @@ tests are very welcome.
 
 ## Things that would genuinely help
 
-- A test suite (there's currently none).
-- Linux verification — the path resolver falls back from Spotlight to `find`, and that
-  fallback has had far less real-world use than the macOS path.
+- **Browser-side tests** for `public/app.js` — panes, find bar, drag handling. The
+  server has a suite; the client doesn't.
+- **Linux verification** — the path resolver falls back from Spotlight to `find`, and
+  that fallback has had far less real-world use than the macOS path.
+- **Confirming the BEL signal.** Attention detection listens for `\x07` *and* falls
+  back to idle-detection. Only the idle path has been observed working in practice; if
+  you can confirm what Claude Code actually emits, the timing could be tightened.
 - Accessibility passes on the web UI.
-- Reducing the replay-buffer memory cost for very long-running sessions.
+- Reducing the replay-buffer memory cost for very long-running sessions (256 KB per
+  session, and `pushBuf` drops whole chunks, so a replay can begin mid-escape-sequence).
 
 ## Reporting bugs
 

@@ -14,7 +14,9 @@ const { WebSocketServer } = require('ws');
 const pty = require('node-pty');
 
 const HOME = process.env.HOME;
-const CHATS_ROOT = path.join(HOME, 'claude-chats');
+// Overridable so the test suite can point at a temp dir (and so anyone who keeps
+// their chats elsewhere can relocate them).
+const CHATS_ROOT = process.env.CHATWEB_CHATS_ROOT || path.join(HOME, 'claude-chats');
 const ARCHIVE_ROOT = path.join(CHATS_ROOT, '.archive');
 const PORT = parseInt(process.env.CHATWEB_PORT || '8790', 10);
 const HOST = '127.0.0.1';
@@ -51,7 +53,6 @@ const SKIP_DIRS = new Set([
 const MAX_DEPTH = 6;             // notes nested deeper than this aren't notes
 const MAX_WALK_ENTRIES = 5000;   // hard stop so one pathological dir can't stall a search
 const MAX_MD_BYTES = 512 * 1024; // skip generated/huge .md — they aren't hand-written notes
-const INDEX_TTL_MS = 1500;       // burst window: don't re-walk on every keystroke
 
 // Persistent session registry: a chat's PTY lives here, DECOUPLED from any socket,
 // so a dropped/closed connection does NOT kill Claude. Keyed by chat name.
@@ -180,6 +181,35 @@ function pushBuf(s, chunk) {
 // keeps them unambiguous — PTY output can contain anything, including valid JSON.
 function sendPty(ws, str) { if (ws && ws.readyState === 1) { try { ws.send(Buffer.from(str, 'utf8')); } catch {} } }
 function sendCtl(ws, obj) { if (ws && ws.readyState === 1) { try { ws.send(JSON.stringify(obj)); } catch {} } }
+// ---- "this session wants you" detection ---------------------------------------
+// With up to 4 panes the hard part stops being screen space and becomes knowing which
+// session is waiting. Two signals, because neither alone is reliable:
+//   * BEL (\x07) — what a TUI emits to get attention. Immediate and unambiguous when
+//     it happens, but not every program rings it.
+//   * idle — output ran and then stopped for ATTN_IDLE_MS while you haven't typed
+//     since. That's the shape of "it finished and is waiting for you". Tune with
+//     CHATWEB_ATTN_IDLE_MS; a long tool call can otherwise look like a pause.
+const ATTN_IDLE_MS = parseInt(process.env.CHATWEB_ATTN_IDLE_MS || '6000', 10);
+
+function noteActivity(s, chunk) {
+  s.dirty = true;                                  // output arrived since you last typed
+  if (chunk.includes('\x07')) return flagAttention(s, 'bell');
+  if (s.idleTimer) clearTimeout(s.idleTimer);
+  s.idleTimer = setTimeout(() => { if (s.dirty) flagAttention(s, 'idle'); }, ATTN_IDLE_MS);
+  if (s.idleTimer.unref) s.idleTimer.unref();
+}
+function flagAttention(s, reason) {
+  if (s.attn === reason) return;                   // don't re-fire the same signal
+  s.attn = reason;
+  sendCtl(s.ws, { type: 'attn', name: s.name, reason });
+}
+// Typing into a session means you're looking at it.
+function clearAttention(s) {
+  s.dirty = false;
+  if (s.idleTimer) { clearTimeout(s.idleTimer); s.idleTimer = null; }
+  if (s.attn) { s.attn = null; sendCtl(s.ws, { type: 'attn-clear', name: s.name }); }
+}
+
 function killSession(name) {
   const s = sessions.get(name); if (!s) return;
   if (s.graceTimer) clearTimeout(s.graceTimer);
@@ -192,9 +222,10 @@ function startSession(name, cols, rows) {
   const term = pty.spawn(SHELL, ['-i', '-c', 'chat "$1"', 'claude-chats-web', name], {
     name: 'xterm-256color', cols, rows, cwd: HOME, env: process.env,
   });
-  const s = { name, term, cols, rows, ws: null, buf: [], bufLen: 0, graceTimer: null, exited: false };
+  const s = { name, term, cols, rows, ws: null, buf: [], bufLen: 0, graceTimer: null, exited: false,
+              dirty: false, attn: null, idleTimer: null };
   sessions.set(name, s);
-  term.onData((d) => { pushBuf(s, d); sendPty(s.ws, d); });
+  term.onData((d) => { pushBuf(s, d); sendPty(s.ws, d); noteActivity(s, d); });
   term.onExit(() => {
     s.exited = true;
     sendPty(s.ws, '\r\n\x1b[90m[session ended]\x1b[0m\r\n');
@@ -231,20 +262,23 @@ function walkMd(dir) {
   return files;
 }
 
-// Per-chat search index, invalidated by a signature over the file set (path+mtime+size)
-// so edits are picked up immediately, but an unchanged workspace is never re-read.
-const indexCache = new Map(); // dir -> { at, sig, text, lower, updated }
+// Per-chat search index, invalidated by a signature over the file set
+// (path+mtime+size). The walk and stats are cheap; the expensive part — reading every
+// note and lowercasing it — happens only when that signature actually changes.
+//
+// There is deliberately no time-based cache on top of this. An earlier version kept a
+// short TTL to absorb search-as-you-type bursts, but it meant an edit made within that
+// window was invisible. Correctness beats the microseconds it saved.
+const indexCache = new Map(); // dir -> { sig, text, lower, updated }
 function chatIndex(dir, withText) {
-  const hit = indexCache.get(dir);
-  if (hit && Date.now() - hit.at < INDEX_TTL_MS && (!withText || hit.text !== null)) return hit;
-
   const files = walkMd(dir);
   let sig = '', updated = 0;
   for (const f of files) {
     sig += `${f.path}:${f.mtimeMs}:${f.size}|`;
     if (f.mtimeMs > updated) updated = f.mtimeMs;
   }
-  if (hit && hit.sig === sig && (!withText || hit.text !== null)) { hit.at = Date.now(); return hit; }
+  const hit = indexCache.get(dir);
+  if (hit && hit.sig === sig && (!withText || hit.text !== null)) return hit;
 
   let text = null;
   if (withText) {
@@ -254,7 +288,7 @@ function chatIndex(dir, withText) {
       try { text += fs.readFileSync(f.path, 'utf8') + '\n'; } catch {}
     }
   }
-  const rec = { at: Date.now(), sig, text, lower: text === null ? null : text.toLowerCase(), updated };
+  const rec = { sig, text, lower: text === null ? null : text.toLowerCase(), updated };
   indexCache.set(dir, rec);
   return rec;
 }
@@ -442,7 +476,8 @@ wss.on('connection', (ws, req) => {
 
   ws.on('message', async (raw) => {
     let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
-    if (msg.type === 'in') s.term.write(msg.data);
+    if (msg.type === 'in') { clearAttention(s); s.term.write(msg.data); }
+    else if (msg.type === 'seen') clearAttention(s);     // pane focused in the browser
     else if (msg.type === 'resize') { try { s.term.resize(msg.cols, msg.rows); s.cols = msg.cols; s.rows = msg.rows; } catch {} }
     else if (msg.type === 'kill') { killSession(name); try { ws.close(); } catch {} }
     else if (msg.type === 'paste') { if (typeof msg.path === 'string') paste(shellEscape(msg.path)); }
@@ -495,12 +530,24 @@ server.on('error', (e) => {
   console.error('[chatweb]', e.message); process.exit(1);
 });
 
-server.listen(PORT, HOST, () => {
-  pruneUploads();
-  const url = `http://${HOST}:${PORT}/?token=${TOKEN}`;
-  console.log('\n  claude-chats-web running (local only)\n');
-  console.log('  ' + url + '\n');
-  if (process.platform === 'darwin' && !process.env.CHATWEB_NO_OPEN) {
-    spawn('open', [url], { stdio: 'ignore', detached: true }).unref();
-  }
-});
+// Only start listening when run directly — `require()`ing this file (the test suite
+// does) must not bind a port or open a browser.
+if (require.main === module) {
+  server.listen(PORT, HOST, () => {
+    pruneUploads();
+    const url = `http://${HOST}:${PORT}/?token=${TOKEN}`;
+    console.log('\n  claude-chats-web running (local only)\n');
+    console.log('  ' + url + '\n');
+    if (process.platform === 'darwin' && !process.env.CHATWEB_NO_OPEN) {
+      spawn('open', [url], { stdio: 'ignore', detached: true }).unref();
+    }
+  });
+}
+
+module.exports = {
+  server, handle, TOKEN, PORT,
+  NAME_RE, SKIP_DIRS, CHATS_ROOT, ARCHIVE_ROOT,
+  walkMd, chatIndex, listChats, searchChats, bestSnippet, moveChat,
+  scoreCandidate, resolveDrop, findByName, shellEscape,
+  parseBody, saveUpload, hostOk, originOk,
+};

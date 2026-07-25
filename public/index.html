@@ -40,6 +40,14 @@
     .tab.active { color: var(--text); background: var(--bg); border-color: var(--muted); }
     .tab.shown { color: var(--text); }                 /* currently visible in a pane */
     .tab.shown:not(.active) { border-color: var(--accent-dim); }
+
+    /* A session that finished / wants input while you were looking elsewhere. */
+    .tab.attn { color: var(--accent); border-color: var(--accent); }
+    .tab.attn .live { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+    @media (prefers-reduced-motion: reduce) { .tab.attn .live { animation: none; } }
+    .termwrap.wants { border-color: var(--accent); }
+    #sound.on { color: var(--accent); border-color: var(--accent); }
     .tab .live { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
     .tab .x { color: var(--muted); font-size: 15px; line-height: 1; padding: 0 2px; border-radius: 4px; }
     .tab .x:hover { color: #fff; background: #6e2b2b; }
@@ -170,6 +178,7 @@
       <button data-l="3" title="3 panes">3</button>
       <button data-l="4" title="4 panes (2×2)">4</button>
     </div>
+    <button id="sound" title="sound off">🔕</button>
     <button id="refresh">refresh</button>
   </header>
 

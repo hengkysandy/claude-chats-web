@@ -73,6 +73,41 @@ Sessions not currently on screen keep running; they're just hidden, so nothing i
 by switching layouts. Each pane gets its own `cols`/`rows` and resizes its PTY
 independently.
 
+Your open tabs and layout are remembered, so a browser reload puts you back where you
+were. Only sessions the server still reports as **live** are reopened — otherwise a
+refresh would silently spawn fresh Claude processes for chats that had already exited.
+
+### Keyboard shortcuts
+⌘ on macOS, Ctrl elsewhere. The terminal never uses these, so nothing is shadowed.
+
+| | |
+|---|---|
+| `⌘1` … `⌘4` | switch layout |
+| `⌘0` | back to the chat list |
+| `⌘⇧]` / `⌘⇧[` | cycle focus between panes (arrows work too) |
+| `⌘F` | find in the focused session |
+
+(`⌘W` is deliberately absent — browsers don't let a page override closing the tab.)
+
+### Knowing which session wants you
+Running four sessions is only useful if you can tell which one finished. A session you
+aren't looking at raises a flag — its tab turns orange with a pulsing dot, and the pane
+border lights up. It clears the moment you focus or type into it.
+
+Two signals feed this, because neither is reliable alone:
+- **BEL (`\x07`)** — what a TUI emits to demand attention. Unambiguous, but not every
+  program sends it.
+- **Idle** — output ran and then stopped for `CHATWEB_ATTN_IDLE_MS` (default 6000)
+  while you haven't typed since. That's the shape of *"it finished and is waiting"*.
+  Raise it if a long tool call gets mistaken for being done.
+
+Optional extras, both off until you turn them on:
+- **🔔 in the header** toggles a short chime (synthesised with Web Audio — no audio
+  file is shipped or fetched). Persists across reloads.
+- **Desktop notifications** are requested the first time you enable sound, and only
+  fire while the browser tab is in the background — a banner for a window you're
+  already staring at is noise. Clicking one focuses that session.
+
 ### Find in session (⌘F / Ctrl-F)
 Browser find can't see terminal output, so the UI drives xterm's search addon instead.
 `⌘F` (macOS) or `Ctrl-F` (Linux/Windows) opens a find bar in the focused pane —
@@ -134,6 +169,18 @@ drive `/pty` gets a shell as you. Controls, in layers:
 - `CHATWEB_PORT`  — default `8790`
 - `CHATWEB_TOKEN` — fixed token instead of random (handy for bookmarks)
 - `CHATWEB_NO_OPEN=1` — don't auto-open the browser
+- `CHATWEB_ATTN_IDLE_MS` — how long output must be quiet before a session is treated
+  as waiting for you (default `6000`)
+- `CHATWEB_CHATS_ROOT` — where chats live (default `~/claude-chats`)
+
+## Tests
+```bash
+npm test        # node --test, no test framework dependency
+npm run check   # syntax-check server.js and public/app.js
+```
+The suite points `CHATWEB_CHATS_ROOT` at a temp dir, so it never touches your real
+chats. `server.js` only binds a port when run directly, so requiring it from a test is
+side-effect free.
 
 ## Notes
 - `node-pty` ships a prebuilt `spawn-helper` that npm extracts without the execute

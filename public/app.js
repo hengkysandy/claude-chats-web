@@ -33,7 +33,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 function renderTabs() {
   let html = `<div class="tab ${active === 'home' ? 'active' : ''}" data-tab="home">▸ chats</div>`;
   for (const s of sessions) {
-    html += `<div class="tab ${active === s.name ? 'active' : ''} ${panes.includes(s.name) ? 'shown' : ''}" data-tab="${esc(s.name)}">
+    html += `<div class="tab ${active === s.name ? 'active' : ''} ${panes.includes(s.name) ? 'shown' : ''} ${s.attn ? 'attn' : ''}" data-tab="${esc(s.name)}">
       <span class="live"></span>${esc(s.name)}<span class="x" data-close="${esc(s.name)}">×</span></div>`;
   }
   const bar = $('tabbar');
@@ -66,6 +66,9 @@ function switchTo(tab) {
   else { focusIdx = Math.min(focusIdx, layout - 1); panes[focusIdx] = tab; }
   renderPanes();
   renderTabs();
+  const s = sessions.find((x) => x.name === tab);
+  if (s && s.attn) seen(s);
+  saveWorkspace();
 }
 
 // Apply `layout` + `panes` to the DOM, then re-fit every visible terminal (each pane
@@ -104,7 +107,8 @@ function renderPanes() {
 function setLayout(n) {
   layout = Math.max(1, Math.min(4, n));
   document.querySelectorAll('#layout button').forEach((b) => b.classList.toggle('on', +b.dataset.l === layout));
-  if (active !== 'home') renderPanes();
+  if (active !== 'home') { renderPanes(); renderTabs(); }
+  saveWorkspace();
 }
 
 // ---------- sessions ----------
@@ -125,11 +129,14 @@ function createSession(name) {
   $('terms').appendChild(wrap);
   // Clicking a pane focuses it, so the next tab you open replaces THAT pane.
   wrap.addEventListener('mousedown', () => {
+    const me = sessions.find((x) => x.name === name);
+    if (me && me.attn) seen(me);              // looking at it clears the indicator
     if (active === name) return;
     active = name;
     focusIdx = Math.max(0, panes.indexOf(name));
     for (const x of sessions) x.wrap.classList.toggle('focused', x.name === name && panes.length > 1);
     renderTabs();
+    saveWorkspace();
   });
 
   const term = new Terminal({
@@ -145,7 +152,7 @@ function createSession(name) {
   term.loadAddon(search);
   term.open(wrap);
 
-  const s = { name, term, fit, search, ws: null, wrap, closing: false, backoff: 1000, pending: new Map() };
+  const s = { name, term, fit, search, ws: null, wrap, closing: false, backoff: 1000, pending: new Map(), attn: false };
   sessions.push(s);
   attachFind(s);
 
@@ -196,6 +203,8 @@ function connect(s) {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
     if (msg.type === 'resolve-result') onResolveResult(s, msg);
     else if (msg.type === 'resolved') s.pending.delete(msg.id);
+    else if (msg.type === 'attn') onAttention(s, msg.reason);
+    else if (msg.type === 'attn-clear') setAttn(s, false);
   };
   ws.onclose = () => {
     if (s.closing) return;                                  // user closed it on purpose
@@ -304,6 +313,131 @@ function closeSession(name) {
   if (active === name) active = panes[0] || sessions[sessions.length - 1].name;
   renderPanes();
   renderTabs();
+  saveWorkspace();
+}
+
+// ---------- "wants your attention" ----------
+// The server tells us a session is waiting (bell, or output that stopped while you
+// haven't typed). If you're already looking at that pane it isn't news — we ack it
+// instead, so the indicator only ever means "somewhere you're NOT looking".
+function watching(s) {
+  return !document.hidden && active === s.name && panes.includes(s.name);
+}
+function setAttn(s, on) {
+  if (s.attn === on) return;
+  s.attn = on;
+  renderTabs();
+  s.wrap.classList.toggle('wants', on);
+}
+function onAttention(s, reason) {
+  if (watching(s)) { seen(s); return; }
+  setAttn(s, true);
+  chime();
+  notify(s, reason);
+}
+
+// Two-note chime, synthesised rather than shipped as an audio file — no asset, no
+// extra request, nothing for the CSP to allow. Off by default; the header toggles it.
+let audioCtx = null;
+function chime() {
+  if (!soundOn) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const now = audioCtx.currentTime;
+    [[880, 0], [1320, 0.11]].forEach(([freq, at]) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      // Quick fade in/out — a raw square edge clicks.
+      gain.gain.setValueAtTime(0.0001, now + at);
+      gain.gain.exponentialRampToValueAtTime(0.16, now + at + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + at + 0.18);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(now + at);
+      osc.stop(now + at + 0.2);
+    });
+  } catch {}
+}
+let soundOn = false;
+// `preview` is true only for a real click — that gesture is what unlocks audio in the
+// browser, and it confirms the choice. Restoring the saved setting must stay silent.
+function setSound(on, preview = false) {
+  soundOn = on;
+  const b = $('sound');
+  if (b) { b.classList.toggle('on', on); b.textContent = on ? '🔔' : '🔕'; b.title = on ? 'sound on' : 'sound off'; }
+  try { localStorage.setItem('chatweb:sound', on ? '1' : '0'); } catch {}
+  if (on && preview) { enableNotifications(); chime(); }
+}
+function seen(s) {
+  if (s.ws && s.ws.readyState === 1) s.ws.send(JSON.stringify({ type: 'seen' }));
+  setAttn(s, false);
+}
+
+// Desktop notification, only while the tab is in the background — a banner for a
+// window you're already staring at is noise. Permission is asked once, on first use.
+let notifyOk = false;
+function notify(s, reason) {
+  if (!notifyOk || !document.hidden || !('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
+  try {
+    const n = new Notification(`${s.name} is waiting`, {
+      body: reason === 'bell' ? 'The session rang for attention.' : 'Output stopped — it looks done.',
+      tag: 'chatweb-' + s.name,        // one live banner per session, not a pile
+    });
+    n.onclick = () => { window.focus(); switchTo(s.name); n.close(); };
+  } catch {}
+}
+function enableNotifications() {
+  if (!('Notification' in window)) return;
+  notifyOk = true;
+  if (Notification.permission === 'default') Notification.requestPermission().catch(() => {});
+}
+
+// ---------- workspace persistence ----------
+// Remember which chats were open and the pane layout. Only sessions the server still
+// reports as live get reopened — otherwise a refresh would silently spawn fresh Claude
+// processes for chats that had already exited.
+const STORE_KEY = 'chatweb:workspace';
+function saveWorkspace() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      layout, panes, active, tabs: sessions.map((s) => s.name),
+    }));
+  } catch {}
+}
+async function restoreWorkspace() {
+  let w;
+  try { w = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch { return; }
+  if (!w || !Array.isArray(w.tabs) || !w.tabs.length) return;
+  if (w.layout) setLayout(w.layout);
+  const live = new Set(lastChats.filter((c) => c.live).map((c) => c.name));
+  const revive = w.tabs.filter((n) => live.has(n));
+  if (!revive.length) return;
+  for (const n of revive) if (!sessions.find((s) => s.name === n)) createSession(n);
+  panes = (w.panes || []).filter((n) => revive.includes(n));
+  if (revive.includes(w.active)) active = w.active;
+  renderPanes();
+  renderTabs();
+}
+
+// ---------- keyboard shortcuts ----------
+// Capture phase so these win before xterm consumes the keystroke. Cmd on macOS,
+// Ctrl elsewhere — the terminal itself never uses those, so nothing is shadowed.
+// (Cmd-W is deliberately absent: browsers don't let a page override closing the tab.)
+function onShortcut(e) {
+  const mod = IS_MAC ? e.metaKey : e.ctrlKey;
+  if (!mod || e.altKey) return;
+  if (e.key >= '1' && e.key <= '4' && !e.shiftKey) { e.preventDefault(); setLayout(+e.key); return; }
+  if (e.key === '0') { e.preventDefault(); switchTo('home'); return; }
+  if (e.shiftKey && (e.key === '[' || e.key === ']' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    e.preventDefault();
+    if (panes.length < 2) return;
+    const dir = (e.key === ']' || e.key === 'ArrowRight') ? 1 : -1;
+    const i = (panes.indexOf(active) + dir + panes.length) % panes.length;
+    switchTo(panes[i]);
+  }
 }
 
 // ---------- in-terminal find (Cmd/Ctrl-F) ----------
@@ -500,5 +634,16 @@ window.addEventListener('resize', () => {
   }, 80);
 });
 
+document.addEventListener('keydown', onShortcut, true);   // capture: beat xterm to it
+$('sound').onclick = () => setSound(!soundOn, true);
+// Coming back to the tab means you're looking again — clear the focused pane's flag.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  const s = sessions.find((x) => x.name === active);
+  if (s && s.attn) seen(s);
+});
+
 renderTabs();
-loadList();
+try { setSound(localStorage.getItem('chatweb:sound') === '1'); } catch {}
+// Load the chat list first — restore needs to know which sessions are still live.
+loadList().then(restoreWorkspace);
