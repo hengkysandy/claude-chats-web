@@ -50,7 +50,10 @@ function renderTabs() {
 function switchTo(tab) {
   if (tab === 'home') {
     active = 'home';
-    $('home').style.display = 'block';
+    // Must be `flex`, not `block`: #home is a flex row (list + help card beside it).
+    // An inline `block` here overrides the stylesheet and drops the card below the
+    // list — visible only after returning from a session, never on a fresh load.
+    $('home').style.display = 'flex';
     $('terms').className = '';
     renderTabs();
     loadList();
