@@ -1,15 +1,25 @@
 {
   "name": "claude-chats-web",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Lightweight local web UI to list and run claude-chats sessions in the browser (wraps the real claude CLI via a PTY).",
+  "license": "MIT",
+  "author": "Hengky Sandy",
+  "homepage": "https://github.com/hengkysandy/claude-chats-web#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/hengkysandy/claude-chats-web.git" },
+  "bugs": { "url": "https://github.com/hengkysandy/claude-chats-web/issues" },
+  "keywords": ["claude", "claude-code", "terminal", "xterm", "pty", "local-ui"],
+  "engines": { "node": ">=18" },
+  "os": ["darwin", "linux"],
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
+    "check": "node --check server.js && node --check public/app.js",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-search": "^0.16.0",
     "@xterm/xterm": "^5.5.0",
     "node-pty": "^1.0.0",
     "ws": "^8.18.0"
