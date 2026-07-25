@@ -56,6 +56,15 @@ It prints a `http://127.0.0.1:8790/?token=…` URL and opens it. `Ctrl-C` to sto
 - **New chat:** type a name, hit *start* → creates the workspace and launches Claude.
 - **Existing chat:** click it → resumes with `claude -c`.
 - **Archived chats** are listed (badge); opening one auto-restores it, same as the CLI.
+- **The list keeps itself current** — it re-reads every 10s while you're looking at it
+  (not while you're inside a session, and not while the browser tab is in the
+  background). *refresh list* does the same thing immediately.
+
+> *refresh list* is not ⌘R. It re-fetches the chat list and nothing else. ⌘R reloads
+> the whole page: every terminal is torn down, every socket dropped, ~400 KB of assets
+> re-fetched, then each session reattaches and replays its scrollback. Your sessions
+> survive either way — they live in the server, not the browser — but there's rarely a
+> reason to pay for the full reload.
 
 ### Split panes
 The `1 2 3 4` buttons in the header split the terminal area so you can watch several

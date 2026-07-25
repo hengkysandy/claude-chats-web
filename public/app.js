@@ -658,6 +658,14 @@ $('q').addEventListener('input', () => {
 
 $('refresh').onclick = () => { if (active === 'home') refreshHome(); };
 
+// The list goes stale on its own: chats can be created from the CLI, sessions start
+// and stop, and the "2m ago" times drift. Poll only while the list is actually on
+// screen and the tab is visible — this costs one small local JSON call, and there's no
+// reason to make it while nobody is looking. The refresh button stays as a manual nudge.
+setInterval(() => {
+  if (active === 'home' && !document.hidden) refreshHome();
+}, 10000);
+
 document.querySelectorAll('#layout button').forEach((b) => (b.onclick = () => setLayout(+b.dataset.l)));
 
 // Every visible pane needs re-fitting, not just the focused one. Debounced so a

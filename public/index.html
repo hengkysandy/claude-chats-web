@@ -143,8 +143,12 @@
     #terms:not(.split-1) .termwrap.pane .pane-tag { display: block; }
     #terms:not(.split-1) .termwrap.focused .pane-tag { color: var(--accent); }
 
-    /* layout picker */
-    #layout { display: flex; gap: 2px; }
+    /* layout picker — the bare numbers meant nothing without a label */
+    #layout { display: flex; gap: 2px; align-items: center; }
+    #layout .lbl {
+      color: var(--muted); font-size: 11px; text-transform: uppercase;
+      letter-spacing: .5px; margin-right: 6px;
+    }
     #layout button {
       padding: 4px 9px; font-size: 12px; border-radius: 5px; min-width: 30px;
     }
@@ -231,14 +235,15 @@
     <img class="logo" src="/favicon.png" alt="" />
     <h1>claude-chats</h1>
     <span class="spacer"></span>
-    <div id="layout" title="split the terminal area into 1–4 panes">
-      <button data-l="1" class="on" title="single pane">1</button>
-      <button data-l="2" title="2 panes side by side">2</button>
-      <button data-l="3" title="3 panes">3</button>
-      <button data-l="4" title="4 panes (2×2)">4</button>
+    <div id="layout">
+      <span class="lbl">panes</span>
+      <button data-l="1" class="on" title="1 pane — full width (⌘1)">1</button>
+      <button data-l="2" title="2 panes — left | right (⌘2)">2</button>
+      <button data-l="3" title="3 panes — left | right, one full-width below (⌘3)">3</button>
+      <button data-l="4" title="4 panes — 2×2 grid (⌘4)">4</button>
     </div>
-    <button id="sound" title="sound off">🔕</button>
-    <button id="refresh">refresh</button>
+    <button id="sound" title="sound off — chime when a session finishes">🔕</button>
+    <button id="refresh" title="Re-read the chat list from disk. Running sessions are not touched — unlike ⌘R, which reloads the whole page.">refresh list</button>
   </header>
 
   <div id="tabbar"></div>
