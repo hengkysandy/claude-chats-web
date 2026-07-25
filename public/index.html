@@ -10,7 +10,7 @@
     :root {
       --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #e6edf3;
       --muted: #8b949e; --accent: #d97757; --accent-dim: #3d2a22; --hover: #21262d;
-      --green: #3fb950;
+      --green: #3fb950; --alert: #f85149; --alert-dim: #3a1d1b;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
@@ -41,12 +41,25 @@
     .tab.shown { color: var(--text); }                 /* currently visible in a pane */
     .tab.shown:not(.active) { border-color: var(--accent-dim); }
 
-    /* A session that finished / wants input while you were looking elsewhere. */
-    .tab.attn { color: var(--accent); border-color: var(--accent); }
-    .tab.attn .live { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+    /* A session that finished / wants input while you were looking elsewhere.
+       The status dot doubles as the signal: green = running, red = wants you. Orange
+       was too close to the accent used everywhere else to read at a glance. */
+    /* The second selector matches the specificity of `.tab.shown:not(.active)` above,
+       which would otherwise keep its dim border on a flagged tab. */
+    .tab.attn,
+    .tab.attn:not(.active) { color: var(--alert); border-color: var(--alert); background: var(--alert-dim); }
+    .tab.attn .live {
+      width: 9px; height: 9px; background: var(--alert);
+      box-shadow: 0 0 0 3px rgba(248, 81, 73, .25), 0 0 8px 1px rgba(248, 81, 73, .8);
+      animation: pulse 1.3s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 3px rgba(248,81,73,.25), 0 0 8px 1px rgba(248,81,73,.8); }
+      50%      { box-shadow: 0 0 0 6px rgba(248,81,73,0),   0 0 8px 1px rgba(248,81,73,.3); }
+    }
     @media (prefers-reduced-motion: reduce) { .tab.attn .live { animation: none; } }
-    .termwrap.wants { border-color: var(--accent); }
+    .termwrap.wants { border-color: var(--alert); }
+    #terms:not(.split-1) .termwrap.wants .pane-tag { color: var(--alert); }
     #sound.on { color: var(--accent); border-color: var(--accent); }
     .tab .live { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
     .tab .x { color: var(--muted); font-size: 15px; line-height: 1; padding: 0 2px; border-radius: 4px; }

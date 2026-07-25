@@ -313,6 +313,7 @@ function closeSession(name) {
   if (active === name) active = panes[0] || sessions[sessions.length - 1].name;
   renderPanes();
   renderTabs();
+  updateTabSignal();          // closing a flagged session must drop it from the count
   saveWorkspace();
 }
 
@@ -328,6 +329,42 @@ function setAttn(s, on) {
   s.attn = on;
   renderTabs();
   s.wrap.classList.toggle('wants', on);
+  updateTabSignal();
+}
+
+// The in-page tab only helps if this page is on screen. When it isn't — another
+// browser tab, another app — the signal has to live where you can still see it: the
+// document title and the favicon.
+const BASE_TITLE = 'claude-chats';
+let favPlain = null, favBadged = null;
+
+function buildFavicons() {
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;              // source is a small pixel logo
+    ctx.drawImage(img, 0, 0, 64, 64);
+    favPlain = c.toDataURL('image/png');
+    // Punch a dark hole first so the dot reads against any part of the logo.
+    ctx.beginPath(); ctx.arc(45, 19, 19, 0, Math.PI * 2);
+    ctx.fillStyle = '#0d1117'; ctx.fill();
+    ctx.beginPath(); ctx.arc(45, 19, 14, 0, Math.PI * 2);
+    ctx.fillStyle = '#f85149'; ctx.fill();
+    favBadged = c.toDataURL('image/png');
+    updateTabSignal();
+  };
+  img.onerror = () => {};                            // no favicon: title badge still works
+  img.src = '/favicon.png';
+}
+
+function updateTabSignal() {
+  const n = sessions.filter((s) => s.attn).length;
+  document.title = n ? `(${n}) ● ${BASE_TITLE}` : BASE_TITLE;
+  const link = document.querySelector('link[rel="icon"]');
+  const want = n ? favBadged : favPlain;
+  if (link && want && link.getAttribute('href') !== want) link.setAttribute('href', want);
 }
 function onAttention(s, reason) {
   if (watching(s)) { seen(s); return; }
@@ -485,7 +522,11 @@ function attachFind(s) {
 
   q.addEventListener('input', () => run('next', true));
   q.addEventListener('keydown', (e) => {
+    // Arrow keys step through matches too — that's the reflex in every other find bar,
+    // and inside a one-line input they have nothing else useful to do.
     if (e.key === 'Enter') { e.preventDefault(); run(e.shiftKey ? 'prev' : 'next', false); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); run('next', false); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); run('prev', false); }
     else if (e.key === 'Escape') { e.preventDefault(); closeFind(s); }
   });
   bar.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => {
@@ -644,6 +685,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 renderTabs();
+buildFavicons();
 try { setSound(localStorage.getItem('chatweb:sound') === '1'); } catch {}
 // Load the chat list first — restore needs to know which sessions are still live.
 loadList().then(restoreWorkspace);

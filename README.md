@@ -85,14 +85,22 @@ refresh would silently spawn fresh Claude processes for chats that had already e
 | `⌘1` … `⌘4` | switch layout |
 | `⌘0` | back to the chat list |
 | `⌘⇧]` / `⌘⇧[` | cycle focus between panes (arrows work too) |
-| `⌘F` | find in the focused session |
+| `⌘F` | find in the focused session (then `↑`/`↓` to step) |
 
 (`⌘W` is deliberately absent — browsers don't let a page override closing the tab.)
 
 ### Knowing which session wants you
 Running four sessions is only useful if you can tell which one finished. A session you
-aren't looking at raises a flag — its tab turns orange with a pulsing dot, and the pane
-border lights up. It clears the moment you focus or type into it.
+aren't looking at raises a flag, and it clears the moment you focus or type into it.
+
+The status dot does double duty — **green means running, red means it wants you**:
+
+- **Tab** — red pulsing dot with a glow, red text and border.
+- **Pane** — red border and red label, so it's obvious in a 4-up grid.
+- **Browser tab** — the page title becomes `(2) ● claude-chats` and a red dot is drawn
+  onto the favicon. This is the one that matters when chatweb isn't the window you're
+  looking at; the favicon is generated on a canvas from the existing icon, so there's
+  no second image to ship.
 
 Two signals feed this, because neither is reliable alone:
 - **BEL (`\x07`)** — what a TUI emits to demand attention. Unambiguous, but not every
@@ -111,9 +119,18 @@ Optional extras, both off until you turn them on:
 ### Find in session (⌘F / Ctrl-F)
 Browser find can't see terminal output, so the UI drives xterm's search addon instead.
 `⌘F` (macOS) or `Ctrl-F` (Linux/Windows) opens a find bar in the focused pane —
-`Ctrl-Shift-F` works everywhere as a fallback. Enter / Shift-Enter step through
-matches, `Aa` toggles case sensitivity, Esc closes. Every match on screen is
-highlighted and the active one is picked out in orange, with an `n/total` counter.
+`Ctrl-Shift-F` works everywhere as a fallback. Every match is highlighted, the active
+one is picked out in orange, and an `n/total` counter tracks where you are.
+
+| | |
+|---|---|
+| `Enter` / `↓` | next match |
+| `Shift-Enter` / `↑` | previous match |
+| `Aa` | toggle case sensitivity |
+| `Esc` | close |
+
+Stepping scrolls the terminal to each match, including matches up in the scrollback —
+you don't have to hunt for the highlight.
 
 > On macOS the shortcut is ⌘F rather than Ctrl-F on purpose: Ctrl-F is *forward-char*
 > in the prompt's readline, and hijacking it would break cursor movement.
