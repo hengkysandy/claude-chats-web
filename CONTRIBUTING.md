@@ -57,9 +57,10 @@ verified it by hand.
   server has a suite; the client doesn't.
 - **Linux verification** — the path resolver falls back from Spotlight to `find`, and
   that fallback has had far less real-world use than the macOS path.
-- **Confirming the BEL signal.** Attention detection listens for `\x07` *and* falls
-  back to idle-detection. Only the idle path has been observed working in practice; if
-  you can confirm what Claude Code actually emits, the timing could be tightened.
+- **Better busy detection.** The amber "working" dot infers busy from PTY output
+  flowing, which works because Claude Code redraws its spinner while it thinks. It's a
+  proxy, not a real signal — a long silent tool call looks idle. If there's a
+  dependable way to ask Claude directly, that would be a real improvement.
 - Accessibility passes on the web UI.
 - Reducing the replay-buffer memory cost for very long-running sessions (256 KB per
   session, and `pushBuf` drops whole chunks, so a replay can begin mid-escape-sequence).

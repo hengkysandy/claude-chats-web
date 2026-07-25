@@ -98,32 +98,33 @@ refresh would silently spawn fresh Claude processes for chats that had already e
 
 (`⌘W` is deliberately absent — browsers don't let a page override closing the tab.)
 
-### Knowing which session wants you
-Running four sessions is only useful if you can tell which one finished. A session you
-aren't looking at raises a flag, and it clears the moment you focus or type into it.
+### Which session is still working
+Running four sessions is only useful if you can tell them apart at a glance. The status
+dot reports what a session **is doing**, on both the tab strip and the chat list:
 
-The status dot does double duty — **green means running, red means it wants you**:
+| dot | meaning |
+|---|---|
+| 🟢 green | alive and idle — ready for you |
+| 🟡 amber, pulsing | Claude is working |
 
-- **Tab** — red pulsing dot with a glow, red text and border.
-- **Pane** — red border and red label, so it's obvious in a 4-up grid.
-- **Browser tab** — the page title becomes `(2) ● claude-chats` and a red dot is drawn
-  onto the favicon. This is the one that matters when chatweb isn't the window you're
-  looking at; the favicon is generated on a canvas from the existing icon, so there's
-  no second image to ship.
+Nothing turns red. Red reads as an error, and an earlier version that flashed red for
+"finished" flickered every time Claude paused between tool calls — a live state is
+calmer and says more.
 
-Two signals feed this, because neither is reliable alone:
-- **BEL (`\x07`)** — what a TUI emits to demand attention. Unambiguous, but not every
-  program sends it.
-- **Idle** — output ran and then stopped for `CHATWEB_ATTN_IDLE_MS` (default 6000)
-  while you haven't typed since. That's the shape of *"it finished and is waiting"*.
-  Raise it if a long tool call gets mistaken for being done.
+Detection is simply whether PTY output is flowing: Claude Code redraws its spinner
+continuously while it works, and output stops when it's waiting on you. A session is
+called idle once output has been quiet for `CHATWEB_BUSY_IDLE_MS` (default 2000). Raise
+it if long tool calls make the dot flicker; lower it for a snappier "done".
 
-Optional extras, both off until you turn them on:
-- **🔔 in the header** toggles a short chime (synthesised with Web Audio — no audio
-  file is shipped or fetched). Persists across reloads.
-- **Desktop notifications** are requested the first time you enable sound, and only
-  fire while the browser tab is in the background — a banner for a window you're
-  already staring at is noise. Clicking one focuses that session.
+When a session finishes while you're looking somewhere else, you also get:
+- a quiet marker on its tab, cleared as soon as you open it;
+- `(2) ● claude-chats` in the page title and a dot on the favicon, which is what helps
+  when chatweb isn't the window you're in. The badged icon is drawn on a canvas from
+  the existing favicon, so no second image ships.
+- **🔔 in the header** — a short chime, synthesised with Web Audio (no audio file is
+  shipped or fetched). Off by default; the setting persists.
+- **Desktop notifications**, requested the first time you enable sound, and only while
+  the browser tab is in the background. Clicking one focuses that session.
 
 ### Find in session (⌘F / Ctrl-F)
 Browser find can't see terminal output, so the UI drives xterm's search addon instead.
@@ -195,8 +196,8 @@ drive `/pty` gets a shell as you. Controls, in layers:
 - `CHATWEB_PORT`  — default `8790`
 - `CHATWEB_TOKEN` — fixed token instead of random (handy for bookmarks)
 - `CHATWEB_NO_OPEN=1` — don't auto-open the browser
-- `CHATWEB_ATTN_IDLE_MS` — how long output must be quiet before a session is treated
-  as waiting for you (default `6000`)
+- `CHATWEB_BUSY_IDLE_MS` — how long output must be quiet before a session's dot goes
+  from amber (working) back to green (idle) — default `2000`
 - `CHATWEB_CHATS_ROOT` — where chats live (default `~/claude-chats`)
 
 ## Tests

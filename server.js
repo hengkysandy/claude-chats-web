@@ -63,6 +63,7 @@ const MAX_BUFFER = 256 * 1024;                                  // replay tail k
 // sessions left with no client attached for that long, to reclaim RAM.
 const DETACH_GRACE_MS = parseInt(process.env.CHATWEB_DETACH_GRACE_MS || '0', 10);
 const isLive = (name) => { const s = sessions.get(name); return !!s && !s.exited; };
+const isBusy = (name) => { const s = sessions.get(name); return !!s && !s.exited && !!s.busy; };
 
 // Dropped/pasted images: the browser can't hand us a real file path, so we write
 // the bytes to a temp file here (outside chat workspaces → not in backups) and type
@@ -181,34 +182,25 @@ function pushBuf(s, chunk) {
 // keeps them unambiguous — PTY output can contain anything, including valid JSON.
 function sendPty(ws, str) { if (ws && ws.readyState === 1) { try { ws.send(Buffer.from(str, 'utf8')); } catch {} } }
 function sendCtl(ws, obj) { if (ws && ws.readyState === 1) { try { ws.send(JSON.stringify(obj)); } catch {} } }
-// ---- "this session wants you" detection ---------------------------------------
-// With up to 4 panes the hard part stops being screen space and becomes knowing which
-// session is waiting. Two signals, because neither alone is reliable:
-//   * BEL (\x07) — what a TUI emits to get attention. Immediate and unambiguous when
-//     it happens, but not every program rings it.
-//   * idle — output ran and then stopped for ATTN_IDLE_MS while you haven't typed
-//     since. That's the shape of "it finished and is waiting for you". Tune with
-//     CHATWEB_ATTN_IDLE_MS; a long tool call can otherwise look like a pause.
-const ATTN_IDLE_MS = parseInt(process.env.CHATWEB_ATTN_IDLE_MS || '6000', 10);
+// ---- busy / idle state ---------------------------------------------------------
+// The dot reports what the session IS doing, rather than firing an alarm when it
+// stops. Claude Code redraws its spinner continuously while it works, so PTY output
+// flowing is a good proxy for "busy"; output going quiet means it's waiting on you.
+//
+// BUSY_IDLE_MS is how long output must be silent before we call it idle. Too short and
+// it flickers on natural gaps between tool calls; too long and "done" feels laggy.
+const BUSY_IDLE_MS = parseInt(process.env.CHATWEB_BUSY_IDLE_MS || '2000', 10);
 
-function noteActivity(s, chunk) {
-  s.dirty = true;                                  // output arrived since you last typed
-  if (chunk.includes('\x07')) return flagAttention(s, 'bell');
+function noteActivity(s) {
+  if (!s.busy) { s.busy = true; sendState(s); }
   if (s.idleTimer) clearTimeout(s.idleTimer);
-  s.idleTimer = setTimeout(() => { if (s.dirty) flagAttention(s, 'idle'); }, ATTN_IDLE_MS);
+  s.idleTimer = setTimeout(() => {
+    s.busy = false;
+    sendState(s);                                  // busy -> idle is also "it finished"
+  }, BUSY_IDLE_MS);
   if (s.idleTimer.unref) s.idleTimer.unref();
 }
-function flagAttention(s, reason) {
-  if (s.attn === reason) return;                   // don't re-fire the same signal
-  s.attn = reason;
-  sendCtl(s.ws, { type: 'attn', name: s.name, reason });
-}
-// Typing into a session means you're looking at it.
-function clearAttention(s) {
-  s.dirty = false;
-  if (s.idleTimer) { clearTimeout(s.idleTimer); s.idleTimer = null; }
-  if (s.attn) { s.attn = null; sendCtl(s.ws, { type: 'attn-clear', name: s.name }); }
-}
+function sendState(s) { sendCtl(s.ws, { type: 'state', name: s.name, busy: !!s.busy }); }
 
 function killSession(name) {
   const s = sessions.get(name); if (!s) return;
@@ -223,9 +215,9 @@ function startSession(name, cols, rows) {
     name: 'xterm-256color', cols, rows, cwd: HOME, env: process.env,
   });
   const s = { name, term, cols, rows, ws: null, buf: [], bufLen: 0, graceTimer: null, exited: false,
-              dirty: false, attn: null, idleTimer: null };
+              busy: false, idleTimer: null };
   sessions.set(name, s);
-  term.onData((d) => { pushBuf(s, d); sendPty(s.ws, d); noteActivity(s, d); });
+  term.onData((d) => { pushBuf(s, d); sendPty(s.ws, d); noteActivity(s); });
   term.onExit(() => {
     s.exited = true;
     sendPty(s.ws, '\r\n\x1b[90m[session ended]\x1b[0m\r\n');
@@ -313,7 +305,7 @@ function listChats() {
     // Newest note wins — dir mtime alone misses edits to an existing file.
     const noteMtime = chatIndex(dir, false).updated;
     if (noteMtime > updated) updated = noteMtime;
-    out.push({ name, archived, created, updated, live: !archived && isLive(name) });
+    out.push({ name, archived, created, updated, live: !archived && isLive(name), busy: !archived && isBusy(name) });
   });
   return out.sort((a, b) => b.updated - a.updated);
 }
@@ -327,7 +319,7 @@ function searchChats(q) {
   eachChat((name, dir, archived) => {
     const idx = chatIndex(dir, true);
     if (tokens.every((t) => idx.lower.includes(t))) {
-      results.push({ name, archived, snippet: bestSnippet(idx.text, tokens), live: !archived && isLive(name), updated: idx.updated });
+      results.push({ name, archived, snippet: bestSnippet(idx.text, tokens), live: !archived && isLive(name), busy: !archived && isBusy(name), updated: idx.updated });
     }
   });
   return results.sort((a, b) => b.updated - a.updated);
@@ -468,6 +460,7 @@ wss.on('connection', (ws, req) => {
   // to redraw its current state cleanly.
   if (reattach && s.bufLen) sendPty(ws, s.buf.join(''));
   try { s.term.resize(cols, rows); s.cols = cols; s.rows = rows; } catch {}
+  sendState(s);        // a reconnecting client must not start from a stale dot
 
   // Wrap in bracketed-paste markers (ESC[200~ … ESC[201~) so Claude treats it as a
   // pasted path — same as dragging into a real terminal. A raw write would look like
@@ -476,8 +469,7 @@ wss.on('connection', (ws, req) => {
 
   ws.on('message', async (raw) => {
     let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
-    if (msg.type === 'in') { clearAttention(s); s.term.write(msg.data); }
-    else if (msg.type === 'seen') clearAttention(s);     // pane focused in the browser
+    if (msg.type === 'in') s.term.write(msg.data);
     else if (msg.type === 'resize') { try { s.term.resize(msg.cols, msg.rows); s.cols = msg.cols; s.rows = msg.rows; } catch {} }
     else if (msg.type === 'kill') { killSession(name); try { ws.close(); } catch {} }
     else if (msg.type === 'paste') { if (typeof msg.path === 'string') paste(shellEscape(msg.path)); }

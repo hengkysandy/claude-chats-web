@@ -33,8 +33,9 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 function renderTabs() {
   let html = `<div class="tab ${active === 'home' ? 'active' : ''}" data-tab="home">▸ chats</div>`;
   for (const s of sessions) {
-    html += `<div class="tab ${active === s.name ? 'active' : ''} ${panes.includes(s.name) ? 'shown' : ''} ${s.attn ? 'attn' : ''}" data-tab="${esc(s.name)}">
-      <span class="live"></span>${esc(s.name)}<span class="x" data-close="${esc(s.name)}">×</span></div>`;
+    const state = s.busy ? 'working' : (s.done ? 'done' : '');
+    html += `<div class="tab ${active === s.name ? 'active' : ''} ${panes.includes(s.name) ? 'shown' : ''} ${state}" data-tab="${esc(s.name)}">
+      <span class="live" title="${s.busy ? 'Claude is working' : 'idle — ready for you'}"></span>${esc(s.name)}<span class="x" data-close="${esc(s.name)}">×</span></div>`;
   }
   const bar = $('tabbar');
   bar.innerHTML = html;
@@ -70,7 +71,7 @@ function switchTo(tab) {
   renderPanes();
   renderTabs();
   const s = sessions.find((x) => x.name === tab);
-  if (s && s.attn) seen(s);
+  if (s) seen(s);
   saveWorkspace();
 }
 
@@ -133,7 +134,7 @@ function createSession(name) {
   // Clicking a pane focuses it, so the next tab you open replaces THAT pane.
   wrap.addEventListener('mousedown', () => {
     const me = sessions.find((x) => x.name === name);
-    if (me && me.attn) seen(me);              // looking at it clears the indicator
+    if (me) seen(me);                         // looking at it marks completion read
     if (active === name) return;
     active = name;
     focusIdx = Math.max(0, panes.indexOf(name));
@@ -155,7 +156,7 @@ function createSession(name) {
   term.loadAddon(search);
   term.open(wrap);
 
-  const s = { name, term, fit, search, ws: null, wrap, closing: false, backoff: 1000, pending: new Map(), attn: false };
+  const s = { name, term, fit, search, ws: null, wrap, closing: false, backoff: 1000, pending: new Map(), busy: false, done: false };
   sessions.push(s);
   attachFind(s);
 
@@ -206,8 +207,7 @@ function connect(s) {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
     if (msg.type === 'resolve-result') onResolveResult(s, msg);
     else if (msg.type === 'resolved') s.pending.delete(msg.id);
-    else if (msg.type === 'attn') onAttention(s, msg.reason);
-    else if (msg.type === 'attn-clear') setAttn(s, false);
+    else if (msg.type === 'state') onState(s, !!msg.busy);
   };
   ws.onclose = () => {
     if (s.closing) return;                                  // user closed it on purpose
@@ -320,18 +320,33 @@ function closeSession(name) {
   saveWorkspace();
 }
 
-// ---------- "wants your attention" ----------
-// The server tells us a session is waiting (bell, or output that stopped while you
-// haven't typed). If you're already looking at that pane it isn't news — we ack it
-// instead, so the indicator only ever means "somewhere you're NOT looking".
+// ---------- session state: idle vs working ----------
+// The dot reports what a session IS doing rather than raising an alarm when it stops:
+//   green          — alive and idle, ready for you
+//   amber, pulsing — Claude is working
+// It previously flashed red for "finished", which read like an error and flickered
+// every time Claude paused between tool calls. A steady live state is calmer and tells
+// you more at a glance across four panes.
 function watching(s) {
   return !document.hidden && active === s.name && panes.includes(s.name);
 }
-function setAttn(s, on) {
-  if (s.attn === on) return;
-  s.attn = on;
+function onState(s, busy) {
+  const finished = s.busy && !busy;        // the busy -> idle edge is "it just finished"
+  s.busy = busy;
+  s.wrap.classList.toggle('working', busy);
+  if (finished && !watching(s)) {          // only news if you weren't already looking
+    s.done = true;                         // survives until you look at it
+    chime();
+    notify(s);
+  }
+  renderTabs();                            // after `done` is set, or the tab misses it
+  updateTabSignal();
+}
+// Looking at a session marks its completion as read.
+function seen(s) {
+  if (!s.done) return;
+  s.done = false;
   renderTabs();
-  s.wrap.classList.toggle('wants', on);
   updateTabSignal();
 }
 
@@ -354,7 +369,8 @@ function buildFavicons() {
     ctx.beginPath(); ctx.arc(45, 19, 19, 0, Math.PI * 2);
     ctx.fillStyle = '#0d1117'; ctx.fill();
     ctx.beginPath(); ctx.arc(45, 19, 14, 0, Math.PI * 2);
-    ctx.fillStyle = '#f85149'; ctx.fill();
+    ctx.fillStyle = '#d97757'; ctx.fill();      // accent, not red — nothing has failed
+
     favBadged = c.toDataURL('image/png');
     updateTabSignal();
   };
@@ -363,17 +379,11 @@ function buildFavicons() {
 }
 
 function updateTabSignal() {
-  const n = sessions.filter((s) => s.attn).length;
+  const n = sessions.filter((s) => s.done).length;
   document.title = n ? `(${n}) ● ${BASE_TITLE}` : BASE_TITLE;
   const link = document.querySelector('link[rel="icon"]');
   const want = n ? favBadged : favPlain;
   if (link && want && link.getAttribute('href') !== want) link.setAttribute('href', want);
-}
-function onAttention(s, reason) {
-  if (watching(s)) { seen(s); return; }
-  setAttn(s, true);
-  chime();
-  notify(s, reason);
 }
 
 // Two-note chime, synthesised rather than shipped as an audio file — no asset, no
@@ -410,20 +420,16 @@ function setSound(on, preview = false) {
   try { localStorage.setItem('chatweb:sound', on ? '1' : '0'); } catch {}
   if (on && preview) { enableNotifications(); chime(); }
 }
-function seen(s) {
-  if (s.ws && s.ws.readyState === 1) s.ws.send(JSON.stringify({ type: 'seen' }));
-  setAttn(s, false);
-}
 
 // Desktop notification, only while the tab is in the background — a banner for a
 // window you're already staring at is noise. Permission is asked once, on first use.
 let notifyOk = false;
-function notify(s, reason) {
+function notify(s) {
   if (!notifyOk || !document.hidden || !('Notification' in window)) return;
   if (Notification.permission !== 'granted') return;
   try {
-    const n = new Notification(`${s.name} is waiting`, {
-      body: reason === 'bell' ? 'The session rang for attention.' : 'Output stopped — it looks done.',
+    const n = new Notification(`${s.name} finished`, {
+      body: 'Claude stopped working — it\'s ready for you.',
       tag: 'chatweb-' + s.name,        // one live banner per session, not a pile
     });
     n.onclick = () => { window.focus(); switchTo(s.name); n.close(); };
@@ -605,6 +611,10 @@ function renderRows(items, isSearch) {
 }
 
 function row(c, isSearch) {
+  // For a chat that's open in a tab we already have its state over the socket — use
+  // that instead of the list payload, which is only as fresh as the last 10s poll.
+  const open = sessions.find((s) => s.name === c.name);
+  if (open) c = { ...c, live: true, busy: !!open.busy };
   const mid = isSearch
     ? `<span class="snippet" title="${esc(c.snippet || '')}">${esc(c.snippet || '')}</span>`
     : `<span class="grow"></span><span class="meta"><span class="rel">${ago(c.updated)}</span><span class="abs">${fmt(c.updated)}</span></span>`;
@@ -614,7 +624,7 @@ function row(c, isSearch) {
   return `
     <div class="chat">
       <span class="arrow" data-open="${esc(c.name)}">▸</span>
-      ${c.live ? '<span class="live" title="running"></span>' : ''}
+      ${c.live ? `<span class="live ${c.busy ? 'working' : ''}" title="${c.busy ? 'Claude is working' : 'idle — ready for you'}"></span>` : ''}
       <span class="name" data-open="${esc(c.name)}">${esc(c.name)}</span>
       ${c.archived ? '<span class="badge">archived</span>' : ''}
       ${mid}
@@ -701,7 +711,7 @@ $('sound').onclick = () => setSound(!soundOn, true);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   const s = sessions.find((x) => x.name === active);
-  if (s && s.attn) seen(s);
+  if (s) seen(s);
 });
 
 renderTabs();
